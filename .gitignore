@@ -1,0 +1,29 @@
+# Секретные данные
+.env
+
+# Базы данных
+*.db
+database/*.db
+
+# Логи
+logs/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -10,6 +10,7 @@ class TournamentCreationStates:
     WAITING_ENTRY_FEE = 5
     WAITING_DESCRIPTION = 6
 
+# Состояния для редактирования турнира
 class TournamentEditStates:
     SELECTING_TOURNAMENT = 10
     EDITING_NAME = 11
@@ -18,6 +19,14 @@ class TournamentEditStates:
     EDITING_FORMAT = 14
     EDITING_ENTRY_FEE = 15
     EDITING_DESCRIPTION = 16
+
+# Состояния для редактирования пользователя
+class UserEditStates:
+    WAITING_TELEGRAM_ID = 30      # Ожидание ввода Telegram ID
+    SHOWING_USER_CARD = 31        # Показ карточки пользователя
+    EDITING_NAME = 32             # Редактирование ФИО
+    SELECTING_CATEGORY = 33       # Выбор категории уровня (C, B, A)
+    SELECTING_LEVEL = 34          # Выбор конкретного уровня (3.5, 4.0...)
     
 # Для завершения разговора
 END = ConversationHandler.END

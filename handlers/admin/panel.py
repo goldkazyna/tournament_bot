@@ -65,8 +65,8 @@ async def export_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT telegram_id, full_name, phone_number, skill_level, 
-                       age_category, created_at
+                SELECT telegram_id, full_name, phone_number, 
+                       player_level, created_at
                 FROM users 
                 WHERE telegram_id > 0
                 ORDER BY created_at DESC
@@ -82,6 +82,7 @@ async def export_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import io
         from datetime import datetime
         import xlsxwriter
+        from levels import get_level_name, get_category_by_level
         
         output = io.BytesIO()
         workbook = xlsxwriter.Workbook(output)
@@ -97,27 +98,50 @@ async def export_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         cell_format = workbook.add_format({'bg_color': '#F8F9FA'})
         
-        # Заголовки
-        headers = ['Telegram ID', 'ФИО', 'Телефон', 'Уровень игры', 'Возрастная категория', 'Дата регистрации']
+        # Заголовки (ОБНОВЛЕНО - убрали "Возрастная категория", добавили "Уровень игры")
+        headers = ['Telegram ID', 'ФИО', 'Телефон', 'Уровень игры', 'Категория', 'Дата регистрации']
         for col, header in enumerate(headers):
             worksheet.write(0, col, header, header_format)
         
         # Данные пользователей
         for row, user in enumerate(users, 1):
-            worksheet.write(row, 0, user[0], cell_format)
-            worksheet.write(row, 1, user[1], cell_format)
-            worksheet.write(row, 2, user[2], cell_format)
-            worksheet.write(row, 3, user[3], cell_format)
-            worksheet.write(row, 4, user[4], cell_format)
-            worksheet.write(row, 5, user[5][:16], cell_format)
+            telegram_id = user[0]
+            full_name = user[1]
+            phone = user[2]
+            player_level = user[3]
+            created_at = user[4]
+            
+            # Форматируем дату регистрации
+            try:
+                created_date = datetime.fromisoformat(created_at)
+                formatted_date = created_date.strftime('%d.%m.%Y')
+            except:
+                formatted_date = created_at[:10] if created_at else ''
+            
+            # Получаем название уровня и категорию
+            if player_level:
+                level_name = get_level_name(player_level)
+                level_display = f"{player_level} ({level_name})"
+                category = get_category_by_level(player_level)
+                category_display = f"Категория {category}" if category else ""
+            else:
+                level_display = "Не установлен"
+                category_display = ""
+            
+            worksheet.write(row, 0, telegram_id, cell_format)
+            worksheet.write(row, 1, full_name, cell_format)
+            worksheet.write(row, 2, phone, cell_format)
+            worksheet.write(row, 3, level_display, cell_format)
+            worksheet.write(row, 4, category_display, cell_format)
+            worksheet.write(row, 5, formatted_date, cell_format)
         
         # Автоподбор ширины колонок
-        worksheet.set_column('A:A', 12)
-        worksheet.set_column('B:B', 25)
-        worksheet.set_column('C:C', 15)
-        worksheet.set_column('D:D', 15)
-        worksheet.set_column('E:E', 18)
-        worksheet.set_column('F:F', 18)
+        worksheet.set_column('A:A', 12)  # Telegram ID
+        worksheet.set_column('B:B', 25)  # ФИО
+        worksheet.set_column('C:C', 15)  # Телефон
+        worksheet.set_column('D:D', 20)  # Уровень игры
+        worksheet.set_column('E:E', 15)  # Категория
+        worksheet.set_column('F:F', 15)  # Дата регистрации
         
         workbook.close()
         output.seek(0)

@@ -4,6 +4,7 @@ import logging
 from services.user_service import UserService
 from states.user_states import ProfileStates
 from utils.keyboards import get_main_menu_keyboard
+from levels import format_level_display
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,15 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text = f"👤 Ваш профиль:\n\n"
         text += f"📝 ФИО: {user_data['full_name']}\n"
-        text += f"📱 Телефон: {user_data['phone_number']}\n"
+        text += f"📱 Телефон: {user_data['phone_number']}\n\n"
+        
+        # Добавляем информацию об уровне
+        if user_data['player_level']:
+            level_display = format_level_display(user_data['player_level'])
+            text += f"{level_display}\n"
+        else:
+            text += "⭐ Уровень: Не установлен\n"
+            text += "💡 Уровень устанавливается администратором\n"
         
         keyboard = [
             [InlineKeyboardButton("✏️ Редактировать ФИО", callback_data="edit_profile")],

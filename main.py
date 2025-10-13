@@ -17,7 +17,7 @@ from handlers.admin.tournament_crud import (
 )
 from handlers.common.menu_handler import handle_menu_buttons
 from states.user_states import RegistrationStates, ProfileStates
-from states.admin_states import TournamentCreationStates, TournamentEditStates
+from states.admin_states import TournamentCreationStates, TournamentEditStates, UserEditStates
 from database.connection import db
 from handlers.user.participation import join_tournament, leave_tournament
 from handlers.admin.moderation import (
@@ -31,6 +31,12 @@ from handlers.admin.tournament_list import (
 )
 from handlers.user.profile import (
     start_edit_profile, handle_new_name, save_profile, cancel_edit
+)
+# НОВЫЕ ИМПОРТЫ для редактирования пользователей
+from handlers.admin.user_edit import (
+    start_user_edit, find_user_by_id, start_edit_name, handle_new_name as handle_user_new_name,
+    start_edit_level, select_level_category, save_selected_level, reset_user_level,
+    cancel_user_edit, show_user_card_callback
 )
 
 # Настройка логирования
@@ -127,6 +133,7 @@ def main():
             per_message=False
         )
         
+        # Обработчик редактирования турнира
         tournament_edit_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(start_tournament_edit, pattern="^edit_tournament$")
@@ -162,6 +169,42 @@ def main():
             ],
             per_message=False
         )
+        
+        # ===============================
+        # НОВЫЙ ConversationHandler для редактирования пользователей
+        # ===============================
+        user_edit_handler = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(start_user_edit, pattern="^edit_user$")
+            ],
+            states={
+                UserEditStates.WAITING_TELEGRAM_ID: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, find_user_by_id)
+                ],
+                UserEditStates.SHOWING_USER_CARD: [
+                    CallbackQueryHandler(start_edit_name, pattern="^edit_user_name$"),
+                    CallbackQueryHandler(start_edit_level, pattern="^edit_user_level$"),
+                    CallbackQueryHandler(show_user_card_callback, pattern="^show_user_card_return$")
+                ],
+                UserEditStates.EDITING_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_new_name)
+                ],
+                UserEditStates.SELECTING_CATEGORY: [
+                    CallbackQueryHandler(select_level_category, pattern="^select_category_"),
+                    CallbackQueryHandler(reset_user_level, pattern="^reset_level$")
+                ],
+                UserEditStates.SELECTING_LEVEL: [
+                    CallbackQueryHandler(save_selected_level, pattern="^set_level_"),
+                    CallbackQueryHandler(start_edit_level, pattern="^edit_user_level$")
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(cancel_user_edit, pattern="^cancel_user_edit$"),
+                CallbackQueryHandler(cancel_user_edit, pattern="^admin_panel_return$")
+            ],
+            per_message=False
+        )
+        
         # ===============================
         # Добавляем обработчики в правильном порядке
         # ===============================
@@ -175,6 +218,8 @@ def main():
         application.add_handler(registration_handler)
         application.add_handler(tournament_creation_handler)
         application.add_handler(profile_edit_handler)
+        application.add_handler(tournament_edit_handler)
+        application.add_handler(user_edit_handler)  # ← НОВЫЙ HANDLER!
         
         # 3. Callback обработчики для турниров
         application.add_handler(CallbackQueryHandler(show_tournament_details, pattern="^tournament_"))
@@ -195,7 +240,6 @@ def main():
         application.add_handler(CallbackQueryHandler(show_admin_tournaments, pattern="^admin_tournaments$"))
         application.add_handler(CallbackQueryHandler(show_tournament_management, pattern="^admin_tournament_"))
         application.add_handler(CallbackQueryHandler(archive_tournament, pattern="^archive_"))
-        application.add_handler(tournament_edit_handler)
         
         # 6. Управление участниками турниров
         application.add_handler(CallbackQueryHandler(export_participants, pattern="^export_[0-9]+$"))

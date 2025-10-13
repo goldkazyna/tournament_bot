@@ -7,6 +7,7 @@ def get_admin_panel_keyboard():
         [InlineKeyboardButton("✏️ Редактировать турнир", callback_data="edit_tournament")],
         [InlineKeyboardButton("⚖️ Модерация заявок", callback_data="admin_moderation")],
         [InlineKeyboardButton("📋 Список турниров", callback_data="admin_tournaments")],
+        [InlineKeyboardButton("👤 Редактировать пользователя", callback_data="edit_user")],  # ← НОВАЯ КНОПКА!
         [InlineKeyboardButton("📊 Выгрузить всех пользователей", callback_data="users_export")]
     ]
     return InlineKeyboardMarkup(keyboard)

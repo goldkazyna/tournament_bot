@@ -194,6 +194,8 @@ async def approve_participant(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # Получаем данные перед одобрением для уведомления
         from database.connection import db
+        from config import MAX_MAIN_PARTICIPANTS
+        
         with db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -213,20 +215,51 @@ async def approve_participant(update: Update, context: ContextTypes.DEFAULT_TYPE
         success = ParticipationService.approve_participation(participation_id)
         
         if success:
-            # Отправляем уведомление пользователю
+            # Определяем позицию участника (основной или резерв)
+            participants = ParticipationService.get_tournament_participants(tournament_id)
+            
+            # Ищем позицию одобренного участника
+            user_position = None
+            for participant in participants:
+                # Сравниваем по user_id из БД
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT telegram_id FROM users 
+                        WHERE full_name = ? AND phone_number = ?
+                    """, (participant['name'], participant['phone']))
+                    user_result = cursor.fetchone()
+                    
+                    if user_result and user_result[0] == participant_user_id:
+                        user_position = participant['position']
+                        break
+            
+            # Отправляем уведомление в зависимости от позиции
             try:
-                await context.bot.send_message(
-                    chat_id=participant_user_id,
-                    text=f"✅ Ваше участие подтверждено!\n\n"
-                         f"Турнир: {tournament_name}\n"
-                         f"Статус: Одобрено организатором\n\n"
-                         f"Увидимся на турнире! 🏆"
-                )
+                if user_position and user_position <= MAX_MAIN_PARTICIPANTS:
+                    # Основной участник
+                    await context.bot.send_message(
+                        chat_id=participant_user_id,
+                        text=f"✅ Ваше участие подтверждено!\n\n"
+                             f"Турнир: {tournament_name}\n"
+                             f"Статус: Основной участник #{user_position}\n\n"
+                             f"Оплата получена. Ждём вас на турнире! 🏆"
+                    )
+                else:
+                    # Резервист
+                    await context.bot.send_message(
+                        chat_id=participant_user_id,
+                        text=f"✅ Ваша заявка одобрена!\n\n"
+                             f"Турнир: {tournament_name}\n"
+                             f"Статус: Резервный участник\n\n"
+                             f"📋 Вы в списке резерва. Если освободится место среди основных участников, "
+                             f"мы сразу же сообщим вам лично!\n\n"
+                             f"Следите за уведомлениями 📱"
+                    )
             except Exception as e:
                 logger.error(f"Failed to send approval notification to {participant_user_id}: {e}")
             
             # Добавляем кнопку админ панель
-            from utils.admin_keyboards import get_admin_panel_keyboard, get_admin_panel_text
             keyboard = [
                 [InlineKeyboardButton("🛠️ Админ панель", callback_data="admin_panel_return")]
             ]
@@ -244,6 +277,7 @@ async def approve_participant(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Error in approve_participant: {e}")
         await query.edit_message_text("Произошла ошибка")
+
 
 async def reject_participant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отклонить участника"""

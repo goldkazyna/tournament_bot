@@ -9,7 +9,7 @@ from services.user_service import UserService
 logger = logging.getLogger(__name__)
 
 async def join_tournament(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик участия в турнире"""
+    """Обработчик участия в турнире с проверкой уровня"""
     try:
         query = update.callback_query
         await query.answer()
@@ -40,13 +40,72 @@ async def join_tournament(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
+        # ============================================
+        # НОВОЕ: ПРОВЕРКА УРОВНЯ ИГРОКА
+        # ============================================
+        
+        from services.tournament_service import TournamentService
+        from levels import check_level_in_range, get_level_name
+        
+        tournament = TournamentService.get_tournament_by_id(tournament_id)
+        user_data = UserService.get_user_by_telegram_id(user_id)
+        
+        if not tournament:
+            await query.edit_message_text("Турнир не найден")
+            return
+        
+        # Проверяем ограничения по уровню
+        if tournament.get('level_restriction') == 'restricted':
+            player_level = user_data.get('player_level')
+            min_level = tournament.get('min_level')
+            max_level = tournament.get('max_level')
+            
+            # Проверка 1: Уровень не установлен
+            if not player_level:
+                keyboard = [
+                    [InlineKeyboardButton("← Назад к турниру", callback_data=f"tournament_{tournament_id}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    "❌ Ваш уровень игры не установлен\n\n"
+                    "Этот турнир имеет ограничения по уровню.\n"
+                    f"Требуемый уровень: {min_level} - {max_level}\n\n"
+                    "📱 Для установки вашего уровня свяжитесь с Кристианом:\n"
+                    "WhatsApp: +7 771 175 4421",
+                    reply_markup=reply_markup
+                )
+                return
+            
+            # Проверка 2: Уровень не подходит по диапазону
+            if not check_level_in_range(player_level, min_level, max_level):
+                player_level_name = get_level_name(player_level)
+                min_level_name = get_level_name(min_level)
+                max_level_name = get_level_name(max_level)
+                
+                keyboard = [
+                    [InlineKeyboardButton("← Назад к турниру", callback_data=f"tournament_{tournament_id}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    f"❌ К сожалению, вы не можете участвовать в этом турнире\n\n"
+                    f"Турнир: {tournament['name']}\n\n"
+                    f"Требуемый уровень: {min_level} - {max_level}\n"
+                    f"({min_level_name} - {max_level_name})\n\n"
+                    f"Ваш уровень: {player_level} ({player_level_name})\n\n"
+                    f"Ищите турниры, подходящие вашему уровню! 🎾",
+                    reply_markup=reply_markup
+                )
+                return
+        
+        # Если турнир открытый ИЛИ уровень подходит - записываем
+        
         # Пытаемся записать на турнир со статусом pending
         success = ParticipationService.add_participant_pending(user_id, tournament_id)
         
         if success:
             from config import PAYMENT_TIMEOUT_MINUTES
-            
-            tournament = TournamentService.get_tournament_by_id(tournament_id)
             
             keyboard = [
                 [InlineKeyboardButton("Отменить участие", callback_data=f"leave_{tournament_id}")],

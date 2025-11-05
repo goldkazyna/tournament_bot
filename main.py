@@ -11,8 +11,12 @@ from handlers.admin.panel import admin_panel, export_all_users
 from handlers.admin.tournament_crud import (
     start_tournament_creation, ask_tournament_name, ask_tournament_date,
     ask_tournament_location, ask_tournament_format, ask_tournament_entry_fee,
-    finish_tournament_creation, cancel_tournament_creation, return_to_admin_panel,
-    handle_tournament_type, cancel_tournament_creation_callback, start_tournament_edit, select_tournament_for_edit, edit_tournament_field,
+    ask_level_restriction, handle_level_restriction_choice,  # ← НОВЫЕ
+    handle_min_level_selection, handle_max_level_selection,  # ← НОВЫЕ
+    finish_tournament_creation_with_levels,  # ← НОВОЕ
+    cancel_tournament_creation, return_to_admin_panel,
+    handle_tournament_type, cancel_tournament_creation_callback,
+    start_tournament_edit, select_tournament_for_edit, edit_tournament_field,
     handle_field_edit, finish_tournament_edit, cancel_field_edit
 )
 from handlers.common.menu_handler import handle_menu_buttons
@@ -84,7 +88,6 @@ def main():
             per_message=False
         )
         
-        # Обработчик создания турнира
         tournament_creation_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(start_tournament_creation, pattern="^create_tournament$")
@@ -109,7 +112,17 @@ def main():
                     MessageHandler(filters.TEXT & ~filters.COMMAND, ask_tournament_entry_fee)
                 ],
                 TournamentCreationStates.WAITING_DESCRIPTION: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, finish_tournament_creation)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, ask_level_restriction)  # ← ИЗМЕНИЛИ!
+                ],
+                # НОВЫЕ СОСТОЯНИЯ:
+                TournamentCreationStates.WAITING_LEVEL_RESTRICTION: [
+                    CallbackQueryHandler(handle_level_restriction_choice, pattern="^level_(open|restricted)$")
+                ],
+                TournamentCreationStates.WAITING_MIN_LEVEL: [
+                    CallbackQueryHandler(handle_min_level_selection, pattern="^minlevel_")
+                ],
+                TournamentCreationStates.WAITING_MAX_LEVEL: [
+                    CallbackQueryHandler(handle_max_level_selection, pattern="^maxlevel_")
                 ]
             },
             fallbacks=[

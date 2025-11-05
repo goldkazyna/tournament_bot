@@ -9,6 +9,9 @@ class TournamentCreationStates:
     WAITING_FORMAT = 4
     WAITING_ENTRY_FEE = 5
     WAITING_DESCRIPTION = 6
+    WAITING_LEVEL_RESTRICTION = 7    # ← НОВОЕ: выбор типа ограничения
+    WAITING_MIN_LEVEL = 8            # ← НОВОЕ: выбор минимального уровня
+    WAITING_MAX_LEVEL = 9            # ← НОВОЕ: выбор максимального уровня
 
 # Состояния для редактирования турнира
 class TournamentEditStates:

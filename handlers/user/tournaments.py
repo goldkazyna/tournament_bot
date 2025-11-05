@@ -5,6 +5,7 @@ from services.tournament_service import TournamentService
 from config import MAX_MAIN_PARTICIPANTS, MAX_RESERVE_PARTICIPANTS
 from services.participation_service import ParticipationService
 from datetime import datetime
+from levels import get_level_name, check_level_in_range
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,19 @@ async def show_tournament_details(update: Update, context: ContextTypes.DEFAULT_
         text += f"💳 {tournament['entry_fee']}\n\n"
         text += f"👥 Участники: {counts['main']}/{MAX_MAIN_PARTICIPANTS} основных\n"
         text += f"📋 Резерв: {counts['reserve']}/{MAX_RESERVE_PARTICIPANTS}\n\n"
+        
+        if tournament.get('level_restriction') == 'restricted' and tournament.get('min_level') and tournament.get('max_level'):
+            min_level = tournament['min_level']
+            max_level = tournament['max_level']
+            min_name = get_level_name(min_level)
+            max_name = get_level_name(max_level)
+            
+            text += f"⭐ Уровень участников: {min_level} - {max_level}\n"
+            text += f"   ({min_name} - {max_name})\n\n"
+        elif tournament.get('level_restriction') == 'open':
+            text += f"⭐ Открытый турнир (любой уровень)\n\n"
 
+        text += f"👥 Участники: {counts['main']}/{MAX_MAIN_PARTICIPANTS} основных\n"
         # Разделяем участников на основных и резерв
         main_participants = [p for p in participants if p['position'] <= MAX_MAIN_PARTICIPANTS]
         reserve_participants = [p for p in participants if p['position'] > MAX_MAIN_PARTICIPANTS]

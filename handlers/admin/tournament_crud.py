@@ -8,7 +8,7 @@ from services.notification_service import NotificationService
 from handlers.admin.panel import is_admin, is_super_admin, is_moderator
 from utils.admin_keyboards import get_admin_panel_keyboard, get_admin_panel_text
 from services.participation_service import ParticipationService
-
+from levels import PLAYER_LEVELS, get_level_name
 
 logger = logging.getLogger(__name__)
 
@@ -212,29 +212,175 @@ async def ask_tournament_entry_fee(update: Update, context: ContextTypes.DEFAULT
             reply_markup=reply_markup
         )
         
-        return TournamentCreationStates.WAITING_DESCRIPTION
+        return TournamentCreationStates.WAITING_DESCRIPTION  # ← Без изменений, идём дальше
         
     except Exception as e:
         logger.error(f"Error in ask_tournament_entry_fee: {e}")
         await update.message.reply_text("Произошла ошибка")
         return END
 
-async def finish_tournament_creation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Завершение создания турнира"""
+async def ask_level_restriction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Спросить про ограничения по уровню"""
     try:
         description = update.message.text.strip()
         
+        context.user_data['tournament_description'] = description
+        
+        # Спрашиваем про ограничения
+        text = "Установить ограничения по уровню игроков?\n\n"
+        text += "🟢 Открытый турнир - могут участвовать игроки любого уровня\n\n"
+        text += "🔒 Установить уровни - только игроки определённого диапазона уровней"
+        
+        keyboard = [
+            [InlineKeyboardButton("🟢 Открытый турнир (любой уровень)", callback_data="level_open")],
+            [InlineKeyboardButton("🔒 Установить ограничения", callback_data="level_restricted")],
+            [InlineKeyboardButton("❌ Отменить создание", callback_data="admin_panel_return")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(text, reply_markup=reply_markup)
+        
+        return TournamentCreationStates.WAITING_LEVEL_RESTRICTION
+        
+    except Exception as e:
+        logger.error(f"Error in ask_level_restriction: {e}")
+        await update.message.reply_text("Произошла ошибка")
+        return END
+
+async def handle_level_restriction_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора типа ограничения"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        choice = query.data  # "level_open" или "level_restricted"
+        
+        if choice == "level_open":
+            # Открытый турнир - сразу создаём
+            context.user_data['level_restriction'] = 'open'
+            context.user_data['min_level'] = None
+            context.user_data['max_level'] = None
+            
+            # Создаём турнир
+            await finish_tournament_creation_with_levels(update, context)
+            return END
+            
+        elif choice == "level_restricted":
+            # Устанавливаем ограничения - выбираем минимальный уровень
+            context.user_data['level_restriction'] = 'restricted'
+            
+            text = "Выберите МИНИМАЛЬНЫЙ уровень участников:\n\n"
+            
+            keyboard = []
+            
+            # Все уровни из levels.py
+            for cat_code, category in PLAYER_LEVELS.items():
+                for level_code, level_name in category['levels'].items():
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"{level_code} - {level_name}", 
+                            callback_data=f"minlevel_{level_code}"
+                        )
+                    ])
+            
+            keyboard.append([InlineKeyboardButton("❌ Отменить", callback_data="admin_panel_return")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(text, reply_markup=reply_markup)
+            
+            return TournamentCreationStates.WAITING_MIN_LEVEL
+        
+    except Exception as e:
+        logger.error(f"Error in handle_level_restriction_choice: {e}")
+        await query.edit_message_text("Произошла ошибка")
+        return END
+        
+async def handle_min_level_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора минимального уровня"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        # Получаем выбранный уровень: minlevel_3.5 -> 3.5
+        min_level = query.data.replace("minlevel_", "")
+        
+        context.user_data['min_level'] = min_level
+        
+        # Теперь выбираем максимальный уровень
+        text = f"Минимальный уровень: {min_level} ({get_level_name(min_level)})\n\n"
+        text += "Выберите МАКСИМАЛЬНЫЙ уровень участников:\n\n"
+        
+        keyboard = []
+        
+        # Показываем только уровни >= минимального
+        for cat_code, category in PLAYER_LEVELS.items():
+            for level_code, level_name in category['levels'].items():
+                if float(level_code) >= float(min_level):
+                    keyboard.append([
+                        InlineKeyboardButton(
+                            f"{level_code} - {level_name}", 
+                            callback_data=f"maxlevel_{level_code}"
+                        )
+                    ])
+        
+        keyboard.append([InlineKeyboardButton("← Назад", callback_data="level_restricted")])
+        keyboard.append([InlineKeyboardButton("❌ Отменить", callback_data="admin_panel_return")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+        
+        return TournamentCreationStates.WAITING_MAX_LEVEL
+        
+    except Exception as e:
+        logger.error(f"Error in handle_min_level_selection: {e}")
+        await query.edit_message_text("Произошла ошибка")
+        return END
+
+async def handle_max_level_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора максимального уровня и создание турнира"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        # Получаем выбранный уровень: maxlevel_4.5 -> 4.5
+        max_level = query.data.replace("maxlevel_", "")
+        
+        context.user_data['max_level'] = max_level
+        
+        # Создаём турнир
+        await finish_tournament_creation_with_levels(update, context)
+        
+        return END
+        
+    except Exception as e:
+        logger.error(f"Error in handle_max_level_selection: {e}")
+        await query.edit_message_text("Произошла ошибка")
+        return END
+
+async def finish_tournament_creation_with_levels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Завершение создания турнира С учётом уровней"""
+    try:
         # Получаем все данные
         name = context.user_data['tournament_name']
-        date = context.user_data['tournament_date'] 
+        date = context.user_data['tournament_date']
         location = context.user_data['tournament_location']
         format_info = context.user_data['tournament_format']
         entry_fee = context.user_data['tournament_entry_fee']
-        created_by = update.effective_user.id
+        description = context.user_data['tournament_description']
+        created_by = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
         tournament_type = context.user_data.get('tournament_type', 'single')
+        
+        # НОВОЕ: данные об уровнях
+        level_restriction = context.user_data.get('level_restriction', 'open')
+        min_level = context.user_data.get('min_level')
+        max_level = context.user_data.get('max_level')
 
-        # Создаем турнир
-        new_tournament_id = TournamentService.create_tournament(
+        # Создаем турнир (обновляем функцию TournamentService)
+        from services.tournament_service import TournamentService
+        
+        new_tournament_id = TournamentService.create_tournament_with_levels(
             name=name,
             date=date,
             location=location,
@@ -242,16 +388,19 @@ async def finish_tournament_creation(update: Update, context: ContextTypes.DEFAU
             entry_fee=entry_fee,
             description=description,
             created_by=created_by,
-            tournament_type=tournament_type
+            tournament_type=tournament_type,
+            level_restriction=level_restriction,
+            min_level=min_level,
+            max_level=max_level
         )
         
         if new_tournament_id:
-            # Получаем созданный турнир по ID
+            # Получаем созданный турнир
             new_tournament = TournamentService.get_tournament_by_id(new_tournament_id)
             
             # Автоматически добавляем системных пользователей только для одиночных турниров
             if tournament_type == 'single':
-                SYSTEM_USERS = [-1000001, -1000002]  # ID системных пользователей
+                SYSTEM_USERS = [-1000001, -1000002]
                 
                 for system_user_id in SYSTEM_USERS:
                     try:
@@ -268,33 +417,57 @@ async def finish_tournament_creation(update: Update, context: ContextTypes.DEFAU
             
             type_text = "Одиночный" if tournament_type == 'single' else "Парный"
             
-            await update.message.reply_text(
+            # Формируем текст с информацией об уровнях
+            success_text = (
                 f"{type_text} турнир создан!\n\n"
                 f"Название: {name}\n"
                 f"Дата: {date}\n"
                 f"Место: {location}\n"
                 f"Формат: {format_info}\n"
-                f"Стоимость: {entry_fee}\n\n"
-                f"Описание: {description}\n\n"
-                f"Уведомления отправлены всем пользователям!",
-                reply_markup=reply_markup
+                f"Стоимость: {entry_fee}\n"
             )
             
-            # Отправляем уведомления всем пользователям
+            # Добавляем информацию об ограничениях
+            if level_restriction == 'open':
+                success_text += f"⭐ Уровень: Открытый турнир (любой уровень)\n\n"
+            else:
+                success_text += (
+                    f"⭐ Уровень участников: {min_level} - {max_level}\n"
+                    f"   ({get_level_name(min_level)} - {get_level_name(max_level)})\n\n"
+                )
+            
+            success_text += f"Описание: {description}\n\n"
+            
+            if SEND_NOTIFICATIONS:
+                success_text += "Уведомления отправлены всем пользователям!"
+            
+            # Отправляем сообщение
+            if update.callback_query:
+                await update.callback_query.edit_message_text(success_text, reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(success_text, reply_markup=reply_markup)
+            
+            # Отправляем уведомления
             if new_tournament and SEND_NOTIFICATIONS:
                 await NotificationService.notify_new_tournament(
                     context.application, new_tournament
                 )
         else:
-            await update.message.reply_text("Ошибка при создании турнира")
+            error_text = "Ошибка при создании турнира"
+            if update.callback_query:
+                await update.callback_query.edit_message_text(error_text)
+            else:
+                await update.message.reply_text(error_text)
         
         context.user_data.clear()
-        return END
         
     except Exception as e:
-        logger.error(f"Error in finish_tournament_creation: {e}")
-        await update.message.reply_text("Произошла ошибка")
-        return END
+        logger.error(f"Error in finish_tournament_creation_with_levels: {e}")
+        error_text = "Произошла ошибка при создании турнира"
+        if update.callback_query:
+            await update.callback_query.edit_message_text(error_text)
+        else:
+            await update.message.reply_text(error_text)
 
 async def cancel_tournament_creation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отмена создания турнира"""

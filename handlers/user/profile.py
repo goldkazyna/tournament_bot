@@ -30,8 +30,9 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             level_display = format_level_display(user_data['player_level'])
             text += f"{level_display}\n"
         else:
-            text += "⭐ Уровень: Не установлен\n"
-            text += "💡 Уровень устанавливается администратором\n"
+            text += "⭐ Уровень: Не установлен\n\n"
+            text += "📱 Для установки вашего уровня свяжитесь с Кристианом:\n"
+            text += "WhatsApp: +7 771 175 4421\n"
         
         keyboard = [
             [InlineKeyboardButton("✏️ Редактировать ФИО", callback_data="edit_profile")],

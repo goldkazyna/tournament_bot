@@ -33,10 +33,22 @@ class NotificationService:
                 f"{tournament['location']}\n"
                 f"{tournament['format_info']}\n"
                 f"{tournament['entry_fee']}\n\n"
-                f"👥 Места: 16 основных + 2 резерв\n\n"
-                f"Регистрация открыта!"
             )
+            # ДОБАВЛЯЕМ ИНФОРМАЦИЮ ОБ УРОВНЯХ
+            if tournament.get('level_restriction') == 'restricted' and tournament.get('min_level') and tournament.get('max_level'):
+                from levels import get_level_name
+                min_level = tournament['min_level']
+                max_level = tournament['max_level']
+                min_name = get_level_name(min_level)
+                max_name = get_level_name(max_level)
+                
+                text += f"⭐ Уровень участников: {min_level} - {max_level}\n"
+                text += f"   ({min_name} - {max_name})\n\n"
+            elif tournament.get('level_restriction') == 'open':
+                text += f"⭐ Открытый турнир (любой уровень)\n\n"
             
+            text += f"👥 Места: 16 основных + 2 резерв\n\n"
+            text += f"Регистрация открыта!"
             keyboard = [
                 [InlineKeyboardButton(
                     "📋 Подробнее о турнире", 

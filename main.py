@@ -197,7 +197,8 @@ def main():
                 UserEditStates.SHOWING_USER_CARD: [
                     CallbackQueryHandler(start_edit_name, pattern="^edit_user_name$"),
                     CallbackQueryHandler(start_edit_level, pattern="^edit_user_level$"),
-                    CallbackQueryHandler(show_user_card_callback, pattern="^show_user_card_return$")
+                    CallbackQueryHandler(show_user_card_callback, pattern="^show_user_card_return$"),
+                    CallbackQueryHandler(start_user_edit, pattern="^edit_user$")  # ← ДОБАВИТЬ ЭТУ СТРОКУ
                 ],
                 UserEditStates.EDITING_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_new_name)

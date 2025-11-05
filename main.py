@@ -19,7 +19,7 @@ from handlers.common.menu_handler import handle_menu_buttons
 from states.user_states import RegistrationStates, ProfileStates
 from states.admin_states import TournamentCreationStates, TournamentEditStates, UserEditStates
 from database.connection import db
-from handlers.user.participation import join_tournament, leave_tournament
+from handlers.user.participation import join_tournament, leave_tournament, confirm_leave_tournament, cancel_leave_tournament
 from handlers.admin.moderation import (
     show_moderation_menu, show_tournament_moderation, 
     show_participant_moderation, approve_participant, reject_participant
@@ -226,6 +226,8 @@ def main():
         application.add_handler(CallbackQueryHandler(back_to_tournaments, pattern="^back_to_tournaments$"))
         application.add_handler(CallbackQueryHandler(join_tournament, pattern="^join_"))
         application.add_handler(CallbackQueryHandler(leave_tournament, pattern="^leave_"))
+        application.add_handler(CallbackQueryHandler(confirm_leave_tournament, pattern="^confirm_leave_"))
+        application.add_handler(CallbackQueryHandler(cancel_leave_tournament, pattern="^cancel_leave_"))
         
         # 4. Обработчики участия
         application.add_handler(CallbackQueryHandler(handle_confirmed_status, pattern="^confirmed_"))

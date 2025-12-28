@@ -22,6 +22,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         text = f"👤 Ваш профиль:\n\n"
+        text += f"🆔 Telegram ID: {user_id}\n"  # ← ДОБАВИЛИ!
         text += f"📝 ФИО: {user_data['full_name']}\n"
         text += f"📱 Телефон: {user_data['phone_number']}\n\n"
         
@@ -32,6 +33,9 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text += "⭐ Уровень: Не установлен\n"
             text += "💡 Уровень устанавливается администратором\n"
+        
+        # ДОБАВЛЯЕМ подсказку для парных турниров
+        text += f"\n💡 Используйте ваш Telegram ID ({user_id}) для регистрации на парные турниры"  # ← ДОБАВИЛИ!
         
         keyboard = [
             [InlineKeyboardButton("✏️ Редактировать ФИО", callback_data="edit_profile")],

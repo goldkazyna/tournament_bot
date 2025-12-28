@@ -9,24 +9,30 @@ logger = logging.getLogger(__name__)
 class TournamentService:
     
     @staticmethod
-    def create_tournament(name: str, date: str, location: str, format_info: str, 
+    def create_tournament_with_levels(name: str, date: str, location: str, format_info: str, 
                          entry_fee: str, description: str, created_by: int, 
-                         tournament_type: str = 'single') -> Optional[int]:
+                         tournament_type: str = 'single',
+                         level_restriction: str = 'open',
+                         min_level: str = None,
+                         max_level: str = None) -> Optional[int]:
+        """Создать турнир с ограничениями по уровню"""
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO tournaments (name, date, location, format_info, entry_fee, 
-                                           description, created_by, tournament_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, date, location, format_info, entry_fee, description, created_by, tournament_type))
+                                           description, created_by, tournament_type,
+                                           level_restriction, min_level, max_level)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, date, location, format_info, entry_fee, description, created_by, 
+                      tournament_type, level_restriction, min_level, max_level))
                 
                 new_tournament_id = cursor.lastrowid
                 conn.commit()
-                logger.info(f"Tournament created: {name} (ID: {new_tournament_id})")
+                logger.info(f"Tournament created with levels: {name} (ID: {new_tournament_id}), restriction: {level_restriction}, range: {min_level}-{max_level}")
                 return new_tournament_id
         except Exception as e:
-            logger.error(f"Error creating tournament: {e}")
+            logger.error(f"Error creating tournament with levels: {e}")
             return None
     
     @staticmethod
@@ -36,7 +42,8 @@ class TournamentService:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, name, date, location, format_info, entry_fee, description, status, created_at
+                    SELECT id, name, date, location, format_info, entry_fee, description, 
+                           status, created_at, tournament_type
                     FROM tournaments WHERE status = 'active'
                     ORDER BY date ASC
                 """)
@@ -54,7 +61,8 @@ class TournamentService:
                         'entry_fee': row[5],
                         'description': row[6],
                         'status': row[7],
-                        'created_at': row[8]
+                        'created_at': row[8],
+                        'tournament_type': row[9]  # ← ДОБАВИТЬ!
                     })
                 
                 return tournaments
@@ -69,7 +77,9 @@ class TournamentService:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, name, date, location, format_info, entry_fee, description, status, created_at
+                    SELECT id, name, date, location, format_info, entry_fee, description, 
+                           status, created_at, level_restriction, min_level, max_level,
+                           tournament_type
                     FROM tournaments WHERE id = ?
                 """, (tournament_id,))
                 
@@ -84,7 +94,11 @@ class TournamentService:
                         'entry_fee': result[5],
                         'description': result[6],
                         'status': result[7],
-                        'created_at': result[8]
+                        'created_at': result[8],
+                        'level_restriction': result[9],
+                        'min_level': result[10],
+                        'max_level': result[11],
+                        'tournament_type': result[12]  # ← ДОБАВИЛИ!
                     }
                 return None
         except Exception as e:

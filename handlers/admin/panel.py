@@ -120,12 +120,11 @@ async def export_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Получаем название уровня и категорию
             if player_level:
-                level_name = get_level_name(player_level)
-                level_display = f"{player_level} ({level_name})"
+                level_display = player_level  # ← ТЕПЕРЬ ПРОСТО "1.5"
                 category = get_category_by_level(player_level)
                 category_display = f"Категория {category}" if category else ""
             else:
-                level_display = "Не установлен"
+                level_display = ""  # ← Пустая строка вместо "Не установлен"
                 category_display = ""
             
             worksheet.write(row, 0, telegram_id, cell_format)
@@ -177,3 +176,184 @@ async def export_all_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=query.message.chat_id,
                 text="Произошла ошибка при экспорте"
             )
+            
+async def import_users_levels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Импорт уровней пользователей из Excel - ТОЛЬКО ДЛЯ ГЛАВНОГО АДМИНА"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = query.from_user.id
+        
+        if not is_super_admin(user_id):
+            await query.edit_message_text("Нет прав доступа. Эта функция доступна только главному администратору.")
+            return
+        
+        keyboard = [
+            [InlineKeyboardButton("❌ Отмена", callback_data="admin_panel_return")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "📤 Импорт уровней пользователей\n\n"
+            "Отправьте Excel файл (.xlsx) с колонками:\n"
+            "• Telegram ID\n"
+            "• ФИО\n"
+            "• Телефон\n"
+            "• Уровень игры (например: 1.5, 2.25, 3.0)\n\n"
+            "⚠️ Пустые уровни будут сброшены в NULL",
+            reply_markup=reply_markup
+        )
+        
+        # Сохраняем состояние ожидания файла
+        context.user_data['awaiting_import'] = True
+        
+    except Exception as e:
+        logger.error(f"Error in import_users_levels: {e}")
+        await query.edit_message_text("Произошла ошибка")
+
+
+async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка загруженного Excel файла для импорта уровней"""
+    try:
+        # Проверяем что ждём файл
+        if not context.user_data.get('awaiting_import'):
+            return
+        
+        user_id = update.effective_user.id
+        
+        if not is_super_admin(user_id):
+            await update.message.reply_text("Нет прав доступа.")
+            return
+        
+        # Проверяем что это документ
+        if not update.message.document:
+            await update.message.reply_text("Пожалуйста, отправьте Excel файл (.xlsx)")
+            return
+        
+        # Проверяем расширение
+        filename = update.message.document.file_name
+        if not filename.endswith('.xlsx'):
+            await update.message.reply_text("Файл должен быть в формате .xlsx")
+            return
+        
+        await update.message.reply_text("⏳ Обрабатываю файл...")
+        
+        # Скачиваем файл
+        file = await context.bot.get_file(update.message.document.file_id)
+        import io
+        file_bytes = io.BytesIO()
+        await file.download_to_memory(file_bytes)
+        file_bytes.seek(0)
+        
+        # Читаем Excel
+        import openpyxl
+        workbook = openpyxl.load_workbook(file_bytes)
+        sheet = workbook.active
+        
+        # Проверяем заголовки
+        headers = [cell.value for cell in sheet[1]]
+        
+        required_headers = ['Telegram ID', 'ФИО', 'Телефон', 'Уровень игры']
+        if not all(h in headers for h in required_headers):
+            await update.message.reply_text(
+                f"❌ Ошибка: файл должен содержать колонки:\n"
+                f"• Telegram ID\n"
+                f"• ФИО\n"
+                f"• Телефон\n"
+                f"• Уровень игры"
+            )
+            context.user_data['awaiting_import'] = False
+            return
+        
+        # Находим индексы колонок
+        telegram_id_col = headers.index('Telegram ID')
+        level_col = headers.index('Уровень игры')
+        
+        # Обрабатываем строки
+        from database.connection import db
+        from datetime import datetime
+        
+        updated_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            try:
+                telegram_id = row[telegram_id_col]
+                new_level = row[level_col]
+                
+                if not telegram_id:
+                    skipped_count += 1
+                    continue
+                
+                # Преобразуем telegram_id в int
+                telegram_id = int(telegram_id)
+                
+                # Обрабатываем уровень
+                if new_level:
+                    # Убираем возможные пробелы и проверяем формат
+                    new_level = str(new_level).strip()
+                    if new_level.lower() in ['', 'не установлен', 'none', 'null']:
+                        new_level = None
+                else:
+                    new_level = None
+                
+                # Обновляем в БД
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    if new_level:
+                        cursor.execute("""
+                            UPDATE users 
+                            SET player_level = ?,
+                                player_level_updated_at = ?,
+                                player_level_updated_by = ?
+                            WHERE telegram_id = ?
+                        """, (new_level, datetime.now(), user_id, telegram_id))
+                    else:
+                        # Сбрасываем уровень
+                        cursor.execute("""
+                            UPDATE users 
+                            SET player_level = NULL,
+                                player_level_updated_at = ?,
+                                player_level_updated_by = ?
+                            WHERE telegram_id = ?
+                        """, (datetime.now(), user_id, telegram_id))
+                    
+                    conn.commit()
+                    
+                    if cursor.rowcount > 0:
+                        updated_count += 1
+                    else:
+                        skipped_count += 1
+                        logger.warning(f"User {telegram_id} not found in database")
+                
+            except Exception as e:
+                error_count += 1
+                logger.error(f"Error processing row {row}: {e}")
+        
+        # Отчёт
+        from utils.admin_keyboards import get_admin_panel_keyboard, get_admin_panel_text
+        
+        report = (
+            f"✅ Импорт завершён!\n\n"
+            f"📊 Статистика:\n"
+            f"• Обновлено: {updated_count}\n"
+            f"• Пропущено: {skipped_count}\n"
+            f"• Ошибок: {error_count}\n\n"
+            f"Файл: {filename}"
+        )
+        
+        await update.message.reply_text(report)
+        await update.message.reply_text(
+            get_admin_panel_text(),
+            reply_markup=get_admin_panel_keyboard()
+        )
+        
+        context.user_data['awaiting_import'] = False
+        
+    except Exception as e:
+        logger.error(f"Error in handle_import_file: {e}")
+        await update.message.reply_text(f"❌ Ошибка при обработке файла: {e}")
+        context.user_data['awaiting_import'] = False

@@ -1,33 +1,42 @@
 import logging
 import asyncio
-from telegram.ext import Application, CommandHandler, ConversationHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ConversationHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import BOT_TOKEN, LOG_LEVEL, LOG_FILE
 from handlers.user.start import start_command, enter_cabinet
 from handlers.user.registration import (
     start_registration, ask_full_name, handle_contact_share, cancel_registration
 )
-from handlers.user.tournaments import show_tournaments_list, show_tournament_details, back_to_tournaments
-from handlers.admin.panel import admin_panel, export_all_users
+from handlers.user.pair_participation import (
+    join_pair_tournament, handle_partner_id, leave_pair_tournament,
+    confirm_leave_pair_tournament, cancel_leave_pair_tournament, cancel_pair_registration
+)
+from handlers.user.tournaments import show_tournaments_list, show_tournament_details, back_to_tournaments, handle_confirmed_pair_status, handle_pending_pair_status
+from handlers.admin.panel import admin_panel, export_all_users, import_users_levels, handle_import_file
 from handlers.admin.tournament_crud import (
     start_tournament_creation, ask_tournament_name, ask_tournament_date,
     ask_tournament_location, ask_tournament_format, ask_tournament_entry_fee,
-    finish_tournament_creation, cancel_tournament_creation, return_to_admin_panel,
-    handle_tournament_type, cancel_tournament_creation_callback, start_tournament_edit, select_tournament_for_edit, edit_tournament_field,
+    ask_level_restriction, handle_level_restriction_choice,  # ← НОВЫЕ
+    handle_min_level_selection, handle_max_level_selection,  # ← НОВЫЕ
+    finish_tournament_creation_with_levels,  # ← НОВОЕ
+    cancel_tournament_creation, return_to_admin_panel,
+    handle_tournament_type, cancel_tournament_creation_callback,
+    start_tournament_edit, select_tournament_for_edit, edit_tournament_field,
     handle_field_edit, finish_tournament_edit, cancel_field_edit
 )
 from handlers.common.menu_handler import handle_menu_buttons
 from states.user_states import RegistrationStates, ProfileStates
 from states.admin_states import TournamentCreationStates, TournamentEditStates, UserEditStates
 from database.connection import db
-from handlers.user.participation import join_tournament, leave_tournament
+from handlers.user.participation import join_tournament, leave_tournament, confirm_leave_tournament, cancel_leave_tournament
 from handlers.admin.moderation import (
     show_moderation_menu, show_tournament_moderation, 
-    show_participant_moderation, approve_participant, reject_participant
+    show_participant_moderation, approve_participant, reject_participant, show_pair_moderation, approve_pair, reject_pair 
 )
 from handlers.user.participation import handle_confirmed_status, handle_pending_status
 from handlers.admin.tournament_list import (
     show_admin_tournaments, show_tournament_management, archive_tournament, 
-    export_participants, show_participants_list, manage_participant, remove_participant
+    export_participants, show_participants_list, manage_participant, remove_participant, manage_pair, remove_pair
 )
 from handlers.user.profile import (
     start_edit_profile, handle_new_name, save_profile, cancel_edit
@@ -38,7 +47,7 @@ from handlers.admin.user_edit import (
     start_edit_level, select_level_category, save_selected_level, reset_user_level,
     cancel_user_edit, show_user_card_callback
 )
-
+from states.pair_states import PairRegistrationStates
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -50,6 +59,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+        
 def main():
     """Главная функция запуска бота"""
     try:
@@ -60,7 +71,12 @@ def main():
         logger.info("Инициализация бота...")
         
         application = Application.builder().token(BOT_TOKEN).build()
-        
+        async def check_partner_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Проверка если ждём ввод ID напарника (для deep link)"""
+            if context.user_data.get('waiting_for_partner_id'):
+                from handlers.user.pair_participation import handle_partner_id
+                context.user_data['waiting_for_partner_id'] = False
+                return await handle_partner_id(update, context)
         # ===============================
         # ConversationHandler-ы (добавляем ПЕРВЫМИ)
         # ===============================
@@ -84,7 +100,6 @@ def main():
             per_message=False
         )
         
-        # Обработчик создания турнира
         tournament_creation_handler = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(start_tournament_creation, pattern="^create_tournament$")
@@ -109,7 +124,17 @@ def main():
                     MessageHandler(filters.TEXT & ~filters.COMMAND, ask_tournament_entry_fee)
                 ],
                 TournamentCreationStates.WAITING_DESCRIPTION: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, finish_tournament_creation)
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, ask_level_restriction)  # ← ИЗМЕНИЛИ!
+                ],
+                # НОВЫЕ СОСТОЯНИЯ:
+                TournamentCreationStates.WAITING_LEVEL_RESTRICTION: [
+                    CallbackQueryHandler(handle_level_restriction_choice, pattern="^level_(open|restricted)$")
+                ],
+                TournamentCreationStates.WAITING_MIN_LEVEL: [
+                    CallbackQueryHandler(handle_min_level_selection, pattern="^minlevel_")
+                ],
+                TournamentCreationStates.WAITING_MAX_LEVEL: [
+                    CallbackQueryHandler(handle_max_level_selection, pattern="^maxlevel_")
                 ]
             },
             fallbacks=[
@@ -184,7 +209,8 @@ def main():
                 UserEditStates.SHOWING_USER_CARD: [
                     CallbackQueryHandler(start_edit_name, pattern="^edit_user_name$"),
                     CallbackQueryHandler(start_edit_level, pattern="^edit_user_level$"),
-                    CallbackQueryHandler(show_user_card_callback, pattern="^show_user_card_return$")
+                    CallbackQueryHandler(show_user_card_callback, pattern="^show_user_card_return$"),
+                    CallbackQueryHandler(start_user_edit, pattern="^edit_user$")  # ← ДОБАВИТЬ ЭТУ СТРОКУ
                 ],
                 UserEditStates.EDITING_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_new_name)
@@ -221,35 +247,67 @@ def main():
         application.add_handler(tournament_edit_handler)
         application.add_handler(user_edit_handler)  # ← НОВЫЙ HANDLER!
         
+        pair_registration_handler = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(join_pair_tournament, pattern="^join_pair_")
+            ],
+            states={
+                PairRegistrationStates.WAITING_PARTNER_ID: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_partner_id)
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(cancel_pair_registration, pattern="^tournament_")  # ← ИЗМЕНИТЬ!
+            ],
+            per_message=False
+        )
+        application.add_handler(pair_registration_handler)
+        
         # 3. Callback обработчики для турниров
         application.add_handler(CallbackQueryHandler(show_tournament_details, pattern="^tournament_"))
         application.add_handler(CallbackQueryHandler(back_to_tournaments, pattern="^back_to_tournaments$"))
-        application.add_handler(CallbackQueryHandler(join_tournament, pattern="^join_"))
+        application.add_handler(CallbackQueryHandler(join_tournament, pattern="^join_(?!pair)"))
         application.add_handler(CallbackQueryHandler(leave_tournament, pattern="^leave_"))
+        application.add_handler(CallbackQueryHandler(confirm_leave_tournament, pattern="^confirm_leave_"))
+        application.add_handler(CallbackQueryHandler(cancel_leave_tournament, pattern="^cancel_leave_"))
         
         # 4. Обработчики участия
         application.add_handler(CallbackQueryHandler(handle_confirmed_status, pattern="^confirmed_"))
         application.add_handler(CallbackQueryHandler(handle_pending_status, pattern="^pending_"))
         
+        application.add_handler(CallbackQueryHandler(leave_pair_tournament, pattern="^leave_pair_"))
+        application.add_handler(CallbackQueryHandler(confirm_leave_pair_tournament, pattern="^confirm_leave_pair_"))
+        application.add_handler(CallbackQueryHandler(cancel_leave_pair_tournament, pattern="^cancel_leave_pair_"))
+        application.add_handler(CallbackQueryHandler(handle_confirmed_pair_status, pattern="^confirmed_pair_"))
+        application.add_handler(CallbackQueryHandler(handle_pending_pair_status, pattern="^pending_pair_"))
+        
         # 5. Админские обработчики
         application.add_handler(CallbackQueryHandler(show_moderation_menu, pattern="^admin_moderation$"))
         application.add_handler(CallbackQueryHandler(show_tournament_moderation, pattern="^moderate_"))
+        application.add_handler(CallbackQueryHandler(show_pair_moderation, pattern="^pair_"))
+        application.add_handler(CallbackQueryHandler(approve_pair, pattern="^approve_pair_"))
+        application.add_handler(CallbackQueryHandler(reject_pair, pattern="^reject_pair_"))
         application.add_handler(CallbackQueryHandler(show_participant_moderation, pattern="^participant_"))
         application.add_handler(CallbackQueryHandler(approve_participant, pattern="^approve_"))
         application.add_handler(CallbackQueryHandler(reject_participant, pattern="^reject_"))
         application.add_handler(CallbackQueryHandler(show_admin_tournaments, pattern="^admin_tournaments$"))
         application.add_handler(CallbackQueryHandler(show_tournament_management, pattern="^admin_tournament_"))
         application.add_handler(CallbackQueryHandler(archive_tournament, pattern="^archive_"))
+
         
         # 6. Управление участниками турниров
         application.add_handler(CallbackQueryHandler(export_participants, pattern="^export_[0-9]+$"))
         application.add_handler(CallbackQueryHandler(show_participants_list, pattern="^participants_list_"))
         application.add_handler(CallbackQueryHandler(manage_participant, pattern="^manage_participant_"))
         application.add_handler(CallbackQueryHandler(remove_participant, pattern="^remove_participant_"))
+        application.add_handler(CallbackQueryHandler(manage_pair, pattern="^manage_pair_"))
+        application.add_handler(CallbackQueryHandler(remove_pair, pattern="^remove_pair_"))
         
         # 7. Экспорт пользователей
         application.add_handler(CallbackQueryHandler(export_all_users, pattern="^export_all_users$"))
         application.add_handler(CallbackQueryHandler(export_all_users, pattern="^users_export$"))
+        application.add_handler(CallbackQueryHandler(import_users_levels, pattern="^users_import$")) 
+        application.add_handler(MessageHandler(filters.Document.ALL, handle_import_file)) 
         
         # 8. Профиль
         application.add_handler(CallbackQueryHandler(save_profile, pattern="^save_profile$"))
@@ -258,7 +316,10 @@ def main():
         
         # 9. Общие admin обработчики (в конце)
         application.add_handler(CallbackQueryHandler(return_to_admin_panel, pattern="^admin_panel_return$"))
-        
+        application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND & filters.Regex(r'^\d+$'),
+            check_partner_id_input
+        ))
         # 10. Обработчик текстовых сообщений (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_buttons))
         

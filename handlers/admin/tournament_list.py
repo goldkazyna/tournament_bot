@@ -4,7 +4,8 @@ import logging
 from services.tournament_service import TournamentService
 from handlers.admin.panel import is_admin, is_super_admin, is_moderator
 from services.participation_service import ParticipationService
-from config import MAX_MAIN_PARTICIPANTS, MAX_RESERVE_PARTICIPANTS
+from services.pair_service import PairService
+from config import MAX_MAIN_PARTICIPANTS, MAX_RESERVE_PARTICIPANTS, MAX_PAIR_SLOTS, MAX_PAIR_RESERVE
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +272,10 @@ async def show_participants_list(update: Update, context: ContextTypes.DEFAULT_T
         if not tournament:
             await query.edit_message_text("Турнир не найден")
             return
-        
+        if tournament.get('tournament_type') == 'double':
+            # Парный турнир - показываем пары
+            await show_pairs_list(query, tournament_id, tournament)
+            return
         if not participants:
             keyboard = [
                 [InlineKeyboardButton("← Назад к управлению", callback_data=f"admin_tournament_{tournament_id}")]
@@ -402,6 +406,13 @@ async def remove_participant(update: Update, context: ContextTypes.DEFAULT_TYPE)
         tournament = TournamentService.get_tournament_by_id(tournament_id)
         participants = ParticipationService.get_tournament_participants(tournament_id)
         
+        # ============================================
+        # НОВОЕ: Проверяем был ли турнир полным ДО удаления
+        # ============================================
+        from config import MAX_MAIN_PARTICIPANTS
+        counts_before = ParticipationService.get_participants_count(tournament_id)
+        was_full = counts_before['available_main'] == 0
+        
         # Находим участника
         participant = None
         participant_user_id = None
@@ -428,7 +439,7 @@ async def remove_participant(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         if success:
             # Уведомляем участника
-            if participant_user_id > 0:  # Добавить эту проверку
+            if participant_user_id > 0:
                 try:
                     await context.bot.send_message(
                         chat_id=participant_user_id,
@@ -439,6 +450,20 @@ async def remove_participant(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     )
                 except Exception as e:
                     logger.error(f"Failed to notify removed participant {participant_user_id}: {e}")
+            
+            # ============================================
+            # НОВОЕ: Если турнир был полным - уведомляем канал
+            # ============================================
+            if was_full:
+                import asyncio
+                from services.notification_service import NotificationService
+                
+                asyncio.create_task(
+                    NotificationService.notify_slot_available(
+                        context.application, tournament
+                    )
+                )
+                logger.info(f"Admin removed participant from full tournament {tournament_id}, notifying channel about free slot")
             
             keyboard = [
                 [InlineKeyboardButton("← К списку участников", callback_data=f"participants_list_{tournament_id}")]
@@ -457,4 +482,242 @@ async def remove_participant(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
     except Exception as e:
         logger.error(f"Error in remove_participant: {e}")
+        await query.edit_message_text("Произошла ошибка")
+        
+async def show_pairs_list(query, tournament_id: int, tournament: dict):
+    """Показать список пар парного турнира"""
+    try:
+        pairs = PairService.get_tournament_pairs(tournament_id)
+        
+        if not pairs:
+            keyboard = [
+                [InlineKeyboardButton("← Назад к управлению", callback_data=f"admin_tournament_{tournament_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"Турнир: {tournament['name']} (ПАРНЫЙ)\n\n"
+                "Пар пока нет",
+                reply_markup=reply_markup
+            )
+            return
+        
+        text = f"Турнир: {tournament['name']} (ПАРНЫЙ)\n"
+        text += f"Всего пар: {len(pairs)}\n\n"
+        text += "Выберите пару для управления:\n\n"
+        
+        keyboard = []
+        
+        # Основные пары
+        main_pairs = [p for p in pairs if p['pair_number'] <= MAX_PAIR_SLOTS]
+        if main_pairs:
+            text += "👥 ОСНОВНЫЕ ПАРЫ:\n"
+            for pair in main_pairs:
+                text += f"{pair['status_icon']} Пара {pair['pair_number']}: {pair['player1_name']} / {pair['player2_name']}\n"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{pair['status_icon']} Пара {pair['pair_number']}: {pair['player1_name'][:10]}... / {pair['player2_name'][:10]}...", 
+                        callback_data=f"manage_pair_{tournament_id}_{pair['pair_id']}"
+                    )
+                ])
+            text += "\n"
+        
+        # Резервные пары
+        reserve_pairs = [p for p in pairs if p['pair_number'] > MAX_PAIR_SLOTS]
+        if reserve_pairs:
+            text += "📋 РЕЗЕРВНЫЕ ПАРЫ:\n"
+            for pair in reserve_pairs:
+                text += f"{pair['status_icon']} Пара {pair['pair_number']}: {pair['player1_name']} / {pair['player2_name']}\n"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{pair['status_icon']} Пара {pair['pair_number']}: {pair['player1_name'][:10]}... / {pair['player2_name'][:10]}...", 
+                        callback_data=f"manage_pair_{tournament_id}_{pair['pair_id']}"
+                    )
+                ])
+        
+        keyboard.append([InlineKeyboardButton("← Назад к управлению", callback_data=f"admin_tournament_{tournament_id}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+        
+    except Exception as e:
+        logger.error(f"Error in show_pairs_list: {e}")
+        await query.edit_message_text("Произошла ошибка")
+
+
+async def manage_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Управление конкретной парой"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = query.from_user.id
+        if not is_super_admin(user_id):
+            await query.edit_message_text("Нет прав доступа. Эта функция доступна только главному администратору.")
+            return
+        if not is_admin(user_id):
+            await query.edit_message_text("Нет прав доступа")
+            return
+        
+        # Парсим данные: manage_pair_tournament_id_pair_id
+        data_parts = query.data.split("_")
+        tournament_id = int(data_parts[2])
+        pair_id = int(data_parts[3])
+        
+        tournament = TournamentService.get_tournament_by_id(tournament_id)
+        
+        # Получаем информацию о паре
+        from database.connection import db
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.id, p.pair_number, p.status,
+                       u1.full_name as player1_name, u1.phone_number as player1_phone,
+                       u2.full_name as player2_name, u2.phone_number as player2_phone,
+                       p.registration_time
+                FROM pairs p
+                JOIN users u1 ON p.player1_id = u1.telegram_id
+                JOIN users u2 ON p.player2_id = u2.telegram_id
+                WHERE p.id = ?
+            """, (pair_id,))
+            
+            result = cursor.fetchone()
+            
+            if not result:
+                await query.edit_message_text("Пара не найдена")
+                return
+        
+        pair_type = "основная" if result[1] <= MAX_PAIR_SLOTS else "резервная"
+        status_text = "одобрено" if result[2] == 'confirmed' else "ожидает"
+        
+        text = f"Управление парой:\n\n"
+        text += f"🏆 Турнир: {tournament['name']}\n"
+        text += f"👥 Пара #{result[1]} ({pair_type})\n\n"
+        text += f"Игрок 1: {result[3]}\n"
+        text += f"📱 Телефон: {result[4]}\n\n"
+        text += f"Игрок 2: {result[5]}\n"
+        text += f"📱 Телефон: {result[6]}\n\n"
+        text += f"⭐ Статус: {status_text}\n"
+        text += f"📅 Регистрация: {result[7][:16]}\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Удалить пару из турнира", callback_data=f"remove_pair_{tournament_id}_{pair_id}")],
+            [InlineKeyboardButton("← Назад к списку", callback_data=f"participants_list_{tournament_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup)
+        
+    except Exception as e:
+        logger.error(f"Error in manage_pair: {e}")
+        await query.edit_message_text("Произошла ошибка")
+
+
+async def remove_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удалить пару из турнира"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = query.from_user.id
+        if not is_super_admin(user_id):
+            await query.edit_message_text("Нет прав доступа. Эта функция доступна только главному администратору.")
+            return
+        if not is_admin(user_id):
+            await query.edit_message_text("Нет прав доступа")
+            return
+        
+        # Парсим данные
+        data_parts = query.data.split("_")
+        tournament_id = int(data_parts[2])
+        pair_id = int(data_parts[3])
+        
+        tournament = TournamentService.get_tournament_by_id(tournament_id)
+        
+        # Получаем информацию о паре
+        from database.connection import db
+        
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.player1_id, p.player2_id,
+                       u1.full_name as player1_name, u2.full_name as player2_name
+                FROM pairs p
+                JOIN users u1 ON p.player1_id = u1.telegram_id
+                JOIN users u2 ON p.player2_id = u2.telegram_id
+                WHERE p.id = ?
+            """, (pair_id,))
+            
+            result = cursor.fetchone()
+            
+            if not result:
+                await query.edit_message_text("Пара не найдена")
+                return
+            
+            player1_id, player2_id, player1_name, player2_name = result
+        
+        # Проверяем был ли турнир полным ДО удаления
+        counts_before = PairService.get_pairs_count(tournament_id)
+        was_full = counts_before['available_main'] == 0
+        
+        # Удаляем пару
+        success = PairService.remove_pair(player1_id, tournament_id)
+        
+        if success:
+            # Уведомляем обоих игроков
+            if player1_id > 0:
+                try:
+                    await context.bot.send_message(
+                        chat_id=player1_id,
+                        text=f"❌ Ваша пара была удалена из турнира\n\n"
+                             f"Турнир: {tournament['name']}\n"
+                             f"Пара: {player1_name} / {player2_name}\n"
+                             f"Причина: Решение администратора\n\n"
+                             f"При необходимости вы можете записаться заново."
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify player1 {player1_id}: {e}")
+            
+            if player2_id > 0:
+                try:
+                    await context.bot.send_message(
+                        chat_id=player2_id,
+                        text=f"❌ Ваша пара была удалена из турнира\n\n"
+                             f"Турнир: {tournament['name']}\n"
+                             f"Пара: {player1_name} / {player2_name}\n"
+                             f"Причина: Решение администратора\n\n"
+                             f"При необходимости вы можете записаться заново."
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify player2 {player2_id}: {e}")
+            
+            # Если турнир был полным - уведомляем канал
+            if was_full:
+                import asyncio
+                from services.notification_service import NotificationService
+                
+                asyncio.create_task(
+                    NotificationService.notify_slot_available(
+                        context.application, tournament
+                    )
+                )
+                logger.info(f"Admin removed pair from full tournament {tournament_id}, notifying channel about free slot")
+            
+            keyboard = [
+                [InlineKeyboardButton("← К списку пар", callback_data=f"participants_list_{tournament_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"✅ Пара удалена из турнира!\n\n"
+                f"Пара: {player1_name} / {player2_name}\n"
+                f"Турнир: {tournament['name']}\n\n"
+                f"Уведомления отправлены обоим игрокам.",
+                reply_markup=reply_markup
+            )
+        else:
+            await query.edit_message_text("Ошибка при удалении пары")
+        
+    except Exception as e:
+        logger.error(f"Error in remove_pair: {e}")
         await query.edit_message_text("Произошла ошибка")

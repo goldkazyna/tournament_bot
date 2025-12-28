@@ -1,36 +1,54 @@
 # Справочник уровней игроков
 
 PLAYER_LEVELS = {
-    "C": {
-        "name": "Категория C (Любители)",
+    "L1": {
+        "name": "Категория L1",
         "emoji": "🟢",
         "levels": {
-            "1.0": "Новички",
-            "1.5": "Начинающий",
-            "2.0": "Продолжающий",
-            "2.5": "Продвинутый"
+            "1.0": "Уровень 1.0",
+            "1.25": "Уровень 1.25",
+            "1.5": "Уровень 1.5",
+            "1.75": "Уровень 1.75"
         }
     },
-    "B": {
-        "name": "Категория B (Опытные)",
+    "L2": {
+        "name": "Категория L2",
+        "emoji": "🔵",
+        "levels": {
+            "2.0": "Уровень 2.0",
+            "2.25": "Уровень 2.25",
+            "2.5": "Уровень 2.5",
+            "2.75": "Уровень 2.75"
+        }
+    },
+    "L3": {
+        "name": "Категория L3",
         "emoji": "🟡",
         "levels": {
-            "3.0": "Опытный",
-            "3.5": "Адванс",
-            "4.0": "Адванс+",
-            "4.5": "Эксперт"
+            "3.0": "Уровень 3.0",
+            "3.25": "Уровень 3.25",
+            "3.5": "Уровень 3.5",
+            "3.75": "Уровень 3.75"
         }
     },
-    "A": {
-        "name": "Категория A (Профи)",
+    "L4": {
+        "name": "Категория L4",
+        "emoji": "🟠",
+        "levels": {
+            "4.0": "Уровень 4.0",
+            "4.25": "Уровень 4.25",
+            "4.5": "Уровень 4.5",
+            "4.75": "Уровень 4.75"
+        }
+    },
+    "L5": {
+        "name": "Категория L5",
         "emoji": "🔴",
         "levels": {
-            "5.0": "Bronze",
-            "5.5": "Silver",
-            "6.0": "Gold",
-            "6.5": "Platinum",
-            "7.0": "Premier Padel",
-            "7.5": "TOP Premier Padel"
+            "5.0": "Уровень 5.0",
+            "5.25": "Уровень 5.25",
+            "5.5": "Уровень 5.5",
+            "5.75": "Уровень 5.75"
         }
     }
 }
@@ -44,13 +62,13 @@ def get_level_name(level_code):
         level_code (str): Код уровня, например "3.5"
     
     Returns:
-        str: Название уровня, например "Адванс", или "Не установлен"
+        str: Название уровня, например "Уровень 3.5", или "Не установлен"
     
     Examples:
         >>> get_level_name("3.5")
-        'Адванс'
+        'Уровень 3.5'
         >>> get_level_name("1.0")
-        'Новички'
+        'Уровень 1.0'
         >>> get_level_name(None)
         'Не установлен'
     """
@@ -72,15 +90,15 @@ def get_category_by_level(level_code):
         level_code (str): Код уровня, например "3.5"
     
     Returns:
-        str: Код категории "C", "B", "A" или None
+        str: Код категории "L1", "L2", "L3", "L4", "L5" или None
     
     Examples:
         >>> get_category_by_level("3.5")
-        'B'
+        'L3'
         >>> get_category_by_level("1.0")
-        'C'
+        'L1'
         >>> get_category_by_level("5.0")
-        'A'
+        'L5'
     """
     if not level_code:
         return None
@@ -97,14 +115,14 @@ def get_category_name(category_code):
     Получить полное название категории
     
     Args:
-        category_code (str): Код категории "C", "B", "A"
+        category_code (str): Код категории "L1", "L2", "L3", "L4", "L5"
     
     Returns:
         str: Полное название категории
     
     Examples:
-        >>> get_category_name("B")
-        'Категория B (Опытные)'
+        >>> get_category_name("L3")
+        'Категория L3'
     """
     if category_code in PLAYER_LEVELS:
         return PLAYER_LEVELS[category_code]["name"]
@@ -122,18 +140,18 @@ def get_level_info(level_code):
         dict: Словарь с информацией об уровне или None
         {
             'code': '3.5',
-            'name': 'Адванс',
-            'category': 'B',
-            'category_name': 'Категория B (Опытные)',
+            'name': 'Уровень 3.5',
+            'category': 'L3',
+            'category_name': 'Категория L3',
             'emoji': '🟡'
         }
     
     Examples:
         >>> info = get_level_info("3.5")
         >>> info['name']
-        'Адванс'
+        'Уровень 3.5'
         >>> info['category']
-        'B'
+        'L3'
     """
     if not level_code:
         return None
@@ -162,7 +180,7 @@ def format_level_display(level_code):
     if info:
         return (
             f"⭐ Уровень: {info['code']} ({info['name']})\n"
-            f"📊 Категория: {info['category_name']}"  # ← ИЗМЕНИЛИ! Убрали {info['category']} -
+            f"📊 Категория: {info['category_name']}"
         )
     
     return "⭐ Уровень: Не установлен"
@@ -211,7 +229,7 @@ def get_all_levels_list():
     Examples:
         >>> levels = get_all_levels_list()
         >>> levels[0]
-        ('1.0', 'Новички')
+        ('1.0', 'Уровень 1.0')
     """
     all_levels = []
     for category in PLAYER_LEVELS.values():

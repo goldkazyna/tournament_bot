@@ -14,6 +14,44 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         logger.info(f"User {telegram_id} ({user.username}) started the bot")
         
+        # ============================================
+        # ДОБАВИЛИ: Обработка deep link для турнира
+        # ============================================
+        if context.args and len(context.args) > 0:
+            command = context.args[0]
+            
+            # Если это ссылка на турнир: tournament_123
+            if command.startswith("tournament_"):
+                tournament_id = int(command.split("_")[1])
+                
+                # Проверяем, зарегистрирован ли пользователь
+                if not UserService.is_user_registered(telegram_id):
+                    # Сохраняем ID турнира для перехода после регистрации
+                    context.user_data['redirect_tournament_id'] = tournament_id
+                    
+                    welcome_message = f"""🎾 Добро пожаловать в турнирного бота по падел теннису!
+
+Привет, {user.first_name}! 
+
+Для просмотра турнира необходимо зарегистрироваться:"""
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("📝 Зарегистрироваться", callback_data="start_registration")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    await update.message.reply_text(welcome_message, reply_markup=reply_markup)
+                    return
+                
+                # Если зарегистрирован - показываем турнир
+                from handlers.user.tournaments import show_tournament_details_direct
+                await show_tournament_details_direct(update, context, tournament_id)
+                return
+        
+        # ============================================
+        # Обычный /start без параметров
+        # ============================================
+        
         # Проверяем, зарегистрирован ли пользователь
         if UserService.is_user_registered(telegram_id):
             # Показываем главное меню для зарегистрированного пользователя

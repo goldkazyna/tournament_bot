@@ -112,7 +112,7 @@ class DatabaseConnection:
                 logger.info("⏭️ Migration skipped: level restrictions already exist in tournaments")
             
             # ========================================
-            # МИГРАЦИЯ 3: Добавление tournament_type в tournaments (если не было)
+            # МИГРАЦИЯ 3: Добавление tournament_type в tournaments
             # ========================================
             cursor.execute("PRAGMA table_info(tournaments)")
             columns = [column[1] for column in cursor.fetchall()]
@@ -123,6 +123,93 @@ class DatabaseConnection:
                 logger.info("✅ Migration complete: tournament_type column added to tournaments")
             else:
                 logger.info("⏭️ Migration skipped: tournament_type already exists in tournaments")
+            
+            # ========================================
+            # МИГРАЦИЯ 4: Создание таблицы pairs для парных турниров
+            # ========================================
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='pairs'
+            """)
+            
+            if not cursor.fetchone():
+                logger.info("Migration: Creating pairs table for double tournaments")
+                cursor.execute('''
+                    CREATE TABLE pairs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tournament_id INTEGER NOT NULL,
+                        player1_id INTEGER NOT NULL,
+                        player2_id INTEGER NOT NULL,
+                        pair_number INTEGER,
+                        status TEXT DEFAULT 'pending',
+                        registration_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        payment_deadline TIMESTAMP,
+                        FOREIGN KEY (tournament_id) REFERENCES tournaments (id),
+                        FOREIGN KEY (player1_id) REFERENCES users (telegram_id),
+                        FOREIGN KEY (player2_id) REFERENCES users (telegram_id),
+                        UNIQUE(tournament_id, player1_id),
+                        UNIQUE(tournament_id, player2_id)
+                    )
+                ''')
+                logger.info("✅ Migration complete: pairs table created")
+            else:
+                logger.info("⏭️ Migration skipped: pairs table already exists")
+            
+            # ========================================
+            # МИГРАЦИЯ 5: Исправление структуры pairs (если была старая версия)
+            # ========================================
+            cursor.execute("PRAGMA table_info(pairs)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            # Проверяем есть ли старые названия колонок
+            if 'captain_user_id' in columns or 'partner_user_id' in columns:
+                logger.info("Migration: Fixing pairs table structure (renaming columns)")
+                
+                # Создаём новую таблицу с правильной структурой
+                cursor.execute('''
+                    CREATE TABLE pairs_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tournament_id INTEGER NOT NULL,
+                        player1_id INTEGER NOT NULL,
+                        player2_id INTEGER NOT NULL,
+                        pair_number INTEGER,
+                        status TEXT DEFAULT 'pending',
+                        registration_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        payment_deadline TIMESTAMP,
+                        FOREIGN KEY (tournament_id) REFERENCES tournaments (id),
+                        FOREIGN KEY (player1_id) REFERENCES users (telegram_id),
+                        FOREIGN KEY (player2_id) REFERENCES users (telegram_id),
+                        UNIQUE(tournament_id, player1_id),
+                        UNIQUE(tournament_id, player2_id)
+                    )
+                ''')
+                
+                # Копируем данные из старой таблицы (если есть)
+                try:
+                    # Определяем какие колонки использовать
+                    old_player1 = 'captain_user_id' if 'captain_user_id' in columns else 'player1_id'
+                    old_player2 = 'partner_user_id' if 'partner_user_id' in columns else 'player2_id'
+                    old_pair_number = 'position' if 'position' in columns else 'pair_number'
+                    old_status = 'pair_status' if 'pair_status' in columns else 'status'
+                    
+                    cursor.execute(f'''
+                        INSERT INTO pairs_new (id, tournament_id, player1_id, player2_id, pair_number, status, registration_time, payment_deadline)
+                        SELECT id, tournament_id, {old_player1}, {old_player2}, {old_pair_number}, {old_status}, registration_time, payment_deadline
+                        FROM pairs
+                    ''')
+                    logger.info(f"Copied {cursor.rowcount} pairs from old table")
+                except Exception as e:
+                    logger.warning(f"No data to copy from old pairs table: {e}")
+                
+                # Удаляем старую таблицу
+                cursor.execute('DROP TABLE pairs')
+                
+                # Переименовываем новую
+                cursor.execute('ALTER TABLE pairs_new RENAME TO pairs')
+                
+                logger.info("✅ Migration complete: pairs table structure fixed")
+            else:
+                logger.info("⏭️ Migration skipped: pairs table already has correct structure")
             
             logger.info("All migrations checked and applied successfully")
             

@@ -7,7 +7,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 # Главные администраторы с полными правами
-SUPER_ADMIN_IDS = [7442002163, 7055682806]
+SUPER_ADMIN_IDS = [7442002163, 7055682806, 6014523881]
 
 # Модераторы (только модерация заявок)
 MODERATOR_IDS = [7657145796]
@@ -20,7 +20,7 @@ DATABASE_PATH = os.getenv('DATABASE_PATH', './database/tournament.db')
 
 # Настройки турнира
 MAX_MAIN_PARTICIPANTS = 16
-MAX_RESERVE_PARTICIPANTS = 2
+MAX_RESERVE_PARTICIPANTS = 0
 PAYMENT_TIMEOUT_MINUTES = 30
 
 # Логирование
@@ -29,6 +29,10 @@ LOG_FILE = './logs/bot.log'
 
 # Настройки парных турниров
 MAX_PAIR_SLOTS = 8
-MAX_PAIR_RESERVE = 2
+MAX_PAIR_RESERVE = 0
+PRIORITY_CHAT_ID = None
+PRIORITY_CHAT_IDS = [381314146, 147420878]  # ← Два приоритетных чата
+CHANNEL_ID = -1003658968965
+
 
 SEND_NOTIFICATIONS = True
